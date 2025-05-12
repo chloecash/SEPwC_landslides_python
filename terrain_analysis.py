@@ -1,4 +1,20 @@
+# terrain_analysis.py
+# Import necessary libraries
 import argparse
+import rasterio
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+from scipy.ndimage import distance_transform_edt
+import rasterio.features
+import rasterio.terrain
+import math
+from scipy import spatial
+
+# End of import section
 
 def convert_to_rasterio(raster_data, template_raster):
   
