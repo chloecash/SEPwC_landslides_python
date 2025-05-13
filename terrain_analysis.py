@@ -16,7 +16,22 @@ def convert_to_rasterio(raster_data, template_raster):
 
 
 def extract_values_from_raster(raster, shape_object):
+    """
+    Extracts values from a raster at given point locations.
 
+    Parameters
+    ----------
+    raster : rasterio.io.DatasetReader
+        The raster that we are sampling from.
+    shape_object : list
+        A list of point objects with x and y coordinates.
+
+    Returns
+    -------
+    list
+        A list of raster values at the point locations.
+
+    """
     return
 
 
