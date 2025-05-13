@@ -32,7 +32,17 @@ def extract_values_from_raster(raster, shape_object):
         A list of raster values at the point locations.
 
     """
-    return
+    
+    values = []
+    
+    for point in shape_object:
+        x = point.x
+        y = point.y
+        
+        for val in raster.sample([(x,y)]):
+            values.append(val[0])
+        
+    return values
 
 
 def make_classifier(x, y, verbose=False):
