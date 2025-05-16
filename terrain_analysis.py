@@ -12,7 +12,21 @@ from proximity import proximity
 # End of import section
 
 def convert_to_rasterio(raster_data, template_raster):
-  
+    """ 
+    Converts a NumPy array back into a Rasterio dataset format using a template.
+    
+    Parameters 
+    ----------
+    raster_data : numpy.ndarray
+        The NumPy array containing raster data to convert.
+    template_raster : rasterio.io.DatasetReader
+        A Rasterio dataset to provide spatial data.
+        
+    Returns
+    -------
+    rasterio.io.DatasetWriter
+        A Rasterio raster dataset containing the converted data.
+    """
     return
 
 
