@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import math
 from scipy import spatial
+from proximity import proximity 
 
 # End of import section
 
