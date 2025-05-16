@@ -61,7 +61,23 @@ def extract_values_from_raster(raster, shape_object):
 
 
 def make_classifier(x, y, verbose=False):
+    """
+    Trains a machine learning classifier based on training data.
 
+    Parameters
+    ----------
+    x : pandas.DataFrame or numpy.ndarray
+        The input feature data for training.
+    y : pandas.Series or numpy.ndarray
+        The target labels.
+    verbose : bool, optional
+        If True, prints progress and performance details.
+
+    Returns
+    -------
+    object
+        A trained classifier object.
+    """
     return
 
 def make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier):
