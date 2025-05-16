@@ -81,7 +81,29 @@ def make_classifier(x, y, verbose=False):
     return
 
 def make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier):
+    """
+    Creates a probability raster predicting landslide hazard using input rasters and a classifier.
 
+    Parameters
+    ----------
+    topo : rasterio.io.DatasetReader
+        Topography raster dataset.
+    geo : rasterio.io.DatasetReader
+        Geology raster dataset.
+    lc : rasterio.io.DatasetReader
+        Landcover raster dataset.
+    dist_fault : numpy.ndarray
+        Array containing distance-to-fault values.
+    slope : numpy.ndarray
+        Array containing slope values.
+    classifier : object
+        Trained classifier used for prediction.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array containing predicted landslide probabilities.
+    """
     return
 
 def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
