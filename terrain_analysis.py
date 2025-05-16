@@ -107,7 +107,31 @@ def make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier):
     return
 
 def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
+    """
+    Compiles input raster and vector data into a pandas DataFrame for model training.
 
+    Parameters
+    ----------
+    topo : rasterio.io.DatasetReader
+        Topography raster dataset.
+    geo : rasterio.io.DatasetReader
+        Geology raster dataset.
+    lc : rasterio.io.DatasetReader
+        Landcover raster dataset.
+    dist_fault : numpy.ndarray
+        Array containing distance-to-fault values.
+    slope : numpy.ndarray
+        Array containing slope values.
+    shape : geopandas.GeoDataFrame
+        GeoDataFrame containing point locations for sampling.
+    landslides : geopandas.GeoDataFrame
+        GeoDataFrame containing known landslide locations.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame containing input variables and corresponding landslide labels.
+    """
     return
 
 
