@@ -136,7 +136,20 @@ def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
 
 
 def main():
+    """
+    Command-line interface for landslide hazard modelling.
 
+    Parses user-specified input arguments for raster and vector files,
+    runs the landslide hazard model pipeline, and writes output raster file.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    None
+    """
 
     parser = argparse.ArgumentParser(
                      prog="Landslide hazard using ML",
