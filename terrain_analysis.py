@@ -8,6 +8,7 @@ import pandas as pd
 import math
 from scipy import spatial
 from proximity import proximity 
+from sklearn.ensemble import RandomForestClassifier
 
 # End of import section
 
@@ -41,8 +42,6 @@ def convert_to_rasterio(raster_data, template_raster, output_file):
     # Write the new raster
     with rasterio.open(output_file, "w", **out_meta) as dest:
         dest.write(raster_data, 1)
-        
-    return
 
 
 def extract_values_from_raster(raster, shape_object):
@@ -71,9 +70,8 @@ def extract_values_from_raster(raster, shape_object):
         
         for val in raster.sample([(x,y)]):
             values.append(val[0])
-        
+   
     return values
-
 
 def make_classifier(x, y, verbose=False):
     """
@@ -93,22 +91,33 @@ def make_classifier(x, y, verbose=False):
     object
         A trained classifier object.
     """
-    return
 
-def make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier):
+    # Create the classifier
+    classifier = RandomForestClassifier(n_estimators=100, random_state=0)
+
+    # Fit the classifier to the training data
+    classifier.fit(x, y)
+
+    # Optionally print progress details
+    if verbose:
+        print("Classifier trained successfully.")
+
+    return classifier
+
+def make_prob_raster_data(topo, geo, lc, dist_fault_rasterised, slope, classifier):
     """
     Creates a probability raster predicting landslide hazard using input rasters and a classifier.
 
     Parameters
     ----------
     topo : rasterio.io.DatasetReader
-        Topography raster dataset.
+        Topography raster dataset (used as spatial template).
     geo : rasterio.io.DatasetReader
         Geology raster dataset.
     lc : rasterio.io.DatasetReader
         Landcover raster dataset.
-    dist_fault : numpy.ndarray
-        Array containing distance-to-fault values.
+    dist_fault_rasterised : numpy.ndarray
+        Rasterised faults (e.g., binary array: 1 where fault exists, else 0).
     slope : numpy.ndarray
         Array containing slope values.
     classifier : object
@@ -119,7 +128,39 @@ def make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier):
     numpy.ndarray
         Array containing predicted landslide probabilities.
     """
-    return
+
+    # Calculate distance raster to fault pixels (where value == 1)
+    distance_to_fault = proximity(topo, dist_fault_rasterised, value=1)
+
+    # Read the other rasters as numpy arrays
+    topo_arr = topo.read(1)
+    geo_arr = geo.read(1)
+    lc_arr = lc.read(1)
+
+    # Flatten all arrays for classifier input (stack features column-wise)
+    # Make sure all arrays have the same shape!
+    height, width = topo_arr.shape
+    n_pixels = height * width
+
+    # Flatten arrays
+    topo_flat = topo_arr.flatten()
+    geo_flat = geo_arr.flatten()
+    lc_flat = lc_arr.flatten()
+    dist_fault_flat = distance_to_fault.flatten()
+    slope_flat = slope.flatten()
+
+    # Stack features into 2D array (n_samples x n_features)
+    X = np.vstack([topo_flat, geo_flat, lc_flat, dist_fault_flat, slope_flat]).T
+
+    # Predict probabilities of landslide hazard
+    # Assuming classifier.predict_proba returns probabilities with shape (n_samples, n_classes)
+    # and that landslide class is at index 1
+    probs = classifier.predict_proba(X)[:, 1]
+
+    # Reshape probabilities back to raster shape
+    prob_raster = probs.reshape((height, width))
+
+    return prob_raster
 
 def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
     """
