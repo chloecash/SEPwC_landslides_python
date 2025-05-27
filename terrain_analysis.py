@@ -188,6 +188,10 @@ def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
     pandas.DataFrame
         DataFrame containing input variables and corresponding landslide labels.
     """
+    # Ensure shape is a GeoDataFrame if it's not already
+    if not hasattr(shape, "geometry"):
+      shape = gpd.GeoDataFrame(geometry=shape)
+    
     # Helper function to extract raster value at a point
     def extract_raster_value(raster, point):
         for val in raster.sample([(point.x, point.y)]):
@@ -221,9 +225,7 @@ def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
         'slope': slope_vals,
         'landslide': labels
     })
-
     return df
-
 
 def main():
     """
