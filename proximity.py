@@ -37,7 +37,7 @@ def proximity(raster, rasterised, value):
     xs, ys = rasterio.transform.xy(raster.transform, rows, cols)
     # They are actually lists, convert them to arrays
     xcoords = np.array(xs).reshape(height,width)
-    ycoords = np.array(ys).reshapde(height,width)
+    ycoords = np.array(ys).reshape(height,width)
 
     # find coords of points that have the target value in the rasterised raster
     xindex, yindex = np.where(rasterised==value)
