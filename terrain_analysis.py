@@ -1,13 +1,13 @@
+"""Module for terrain analysis including data processing and modeling."""
 # terrain_analysis.py
 # Import necessary libraries
-import argparse
+import math
+import os
+
 import rasterio
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import math
-from scipy import spatial
-from proximity import proximity 
 from sklearn.ensemble import RandomForestClassifier
 
 # End of import section
@@ -29,7 +29,6 @@ def convert_to_rasterio(raster_data, template_raster, output_file):
     -------
     None
     """
-    
     # Copy metadata from template
     out_meta = template_raster.meta.copy()
 
@@ -43,6 +42,8 @@ def convert_to_rasterio(raster_data, template_raster, output_file):
     with rasterio.open(output_file, "w", **out_meta) as dest:
         dest.write(raster_data, 1)
 
+    # Reopen the written file and return the rasterio dataset object
+    return rasterio.open(raster_data, template_raster, output_file)
 
 def extract_values_from_raster(raster, shape_object):
     """
@@ -162,7 +163,7 @@ def make_prob_raster_data(topo, geo, lc, dist_fault_rasterised, slope, classifie
 
     return prob_raster
 
-def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
+def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides_gdf):
     """
     Compiles input raster and vector data into a pandas DataFrame for model training.
 
@@ -188,10 +189,26 @@ def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
     pandas.DataFrame
         DataFrame containing input variables and corresponding landslide labels.
     """
+    landslides = gpd.read_file("sepwc/SEPwC_landslides_python/data/landslides.shp")
+    
+    # If dist_fault or slope are rasterio DatasetReader objects, convert them to numpy arrays
+    if hasattr(dist_fault, 'read'):
+        dist_fault = dist_fault.read(1)
+    if hasattr(slope, 'read'):
+        slope = slope.read(1)
+    
+    
+    # Ensure they are 2D
+    height, width = topo.read(1).shape
+    if dist_fault.ndim == 1:
+        dist_fault = dist_fault.reshape((height, width))
+    if slope.ndim == 1:
+        slope = slope.reshape((height, width))
+        
     # Ensure shape is a GeoDataFrame if it's not already
     if not hasattr(shape, "geometry"):
       shape = gpd.GeoDataFrame(geometry=shape)
-    
+      
     # Helper function to extract raster value at a point
     def extract_raster_value(raster, point):
         for val in raster.sample([(point.x, point.y)]):
@@ -204,7 +221,8 @@ def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
 
     # Extract distance and slope values at each point by converting point to row,col
     # Use rasterio.transform.rowcol to get raster indices from coordinates
-    rows, cols = zip(*[rasterio.transform.rowcol(topo.transform, pt.x, pt.y) for pt in shape.geometry])
+    rows, cols = zip(*[rasterio.transform.rowcol(topo.transform, pt.x, pt.y)\
+    for pt in shape.geometry])
 
     dist_vals = [dist_fault[row, col] for row, col in zip(rows, cols)]
     slope_vals = [slope[row, col] for row, col in zip(rows, cols)]
