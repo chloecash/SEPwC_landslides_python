@@ -188,7 +188,41 @@ def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
     pandas.DataFrame
         DataFrame containing input variables and corresponding landslide labels.
     """
-    return
+    # Helper function to extract raster value at a point
+    def extract_raster_value(raster, point):
+        for val in raster.sample([(point.x, point.y)]):
+            return val[0]
+
+    # Extract raster values for each point in shape GeoDataFrame
+    topo_vals = [extract_raster_value(topo, pt) for pt in shape.geometry]
+    geo_vals = [extract_raster_value(geo, pt) for pt in shape.geometry]
+    lc_vals = [extract_raster_value(lc, pt) for pt in shape.geometry]
+
+    # Extract distance and slope values at each point by converting point to row,col
+    # Use rasterio.transform.rowcol to get raster indices from coordinates
+    rows, cols = zip(*[rasterio.transform.rowcol(topo.transform, pt.x, pt.y) for pt in shape.geometry])
+
+    dist_vals = [dist_fault[row, col] for row, col in zip(rows, cols)]
+    slope_vals = [slope[row, col] for row, col in zip(rows, cols)]
+
+    # Create a list to hold labels: 1 if point intersects landslide, else 0
+    # We'll check for spatial intersection with landslide polygons
+    labels = []
+    for pt in shape.geometry:
+        intersects = landslides.intersects(pt).any()
+        labels.append(1 if intersects else 0)
+
+    # Assemble DataFrame
+    df = pd.DataFrame({
+        'topo': topo_vals,
+        'geo': geo_vals,
+        'lc': lc_vals,
+        'dist_fault': dist_vals,
+        'slope': slope_vals,
+        'landslide': labels
+    })
+
+    return df
 
 
 def main():
