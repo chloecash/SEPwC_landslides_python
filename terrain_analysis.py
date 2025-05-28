@@ -3,7 +3,6 @@
 # Import necessary libraries
 import math
 import os
-
 import rasterio
 import geopandas as gpd
 import numpy as np
@@ -12,38 +11,36 @@ from sklearn.ensemble import RandomForestClassifier
 
 # End of import section
 
-def convert_to_rasterio(raster_data, template_raster, output_file):
-    """ 
-    Converts a NumPy array back into a Rasterio dataset format using a template.
-    
-    Parameters 
-    ----------
-    raster_data : numpy.ndarray
-        The NumPy array containing raster data to convert.
-    template_raster : rasterio.io.DatasetReader
-        A Rasterio dataset to provide spatial data.
-    output_file : str
-        Path to save the output raster file
-        
-    Returns
-    -------
-    None
+def convert_to_rasterio(raster_data, template_raster, output_file="temp_output.tif"):
     """
-    # Copy metadata from template
+    Convert a numpy array to a rasterio dataset using metadata from a template raster.
+    
+    Parameters:
+    - raster_data: numpy array containing the raster values
+    - template_raster: an open rasterio dataset to use as a template for metadata
+    - output_file: optional filename to write the new raster to disk (default: "temp_output.tif")
+    
+    Returns:
+    - rasterio.io.DatasetReader object of the newly written raster
+    """
+    # Copy metadata from the template raster
     out_meta = template_raster.meta.copy()
-
-    # Update metadata for number of bands and data type
+    
+    # Update metadata to match the raster_data
     out_meta.update({
-        "count": 1,
-        "dtype": raster_data.dtype
+        "count": 1,  # number of bands
+        "dtype": raster_data.dtype,
+        "height": raster_data.shape[0],
+        "width": raster_data.shape[1],
+        "transform": template_raster.transform
     })
 
-    # Write the new raster
+    # Write the raster_data to a new file
     with rasterio.open(output_file, "w", **out_meta) as dest:
-        dest.write(raster_data, 1)
+        dest.write(raster_data, 1)  # write to band 1
 
-    # Reopen the written file and return the rasterio dataset object
-    return rasterio.open(raster_data, template_raster, output_file)
+    # Reopen the written file and return it
+    return rasterio.open(output_file)
 
 def extract_values_from_raster(raster, shape_object):
     """
@@ -189,7 +186,7 @@ def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides_gdf):
     pandas.DataFrame
         DataFrame containing input variables and corresponding landslide labels.
     """
-    landslides = gpd.read_file("sepwc/SEPwC_landslides_python/data/landslides.shp")
+    landslides = gpd.read_file("data/landslides.shp")
     
     # If dist_fault or slope are rasterio DatasetReader objects, convert them to numpy arrays
     if hasattr(dist_fault, 'read'):
