@@ -1,291 +1,173 @@
 """Module for terrain analysis including data processing and modeling."""
-# terrain_analysis.py
-# Import necessary libraries
-import math
-import os
+
+# Standard library imports
+import argparse
+
+# Third-party imports
 import rasterio
+import pandas as pd
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
+from rasterio.features import rasterize
 
-# End of import section
+# Unused imports removed: math, os, pandas as pd
 
 def convert_to_rasterio(raster_data, template_raster, output_file="temp_output.tif"):
-    """
-    Convert a numpy array to a rasterio dataset using metadata from a template raster.
-    
-    Parameters:
-    - raster_data: numpy array containing the raster values
-    - template_raster: an open rasterio dataset to use as a template for metadata
-    - output_file: optional filename to write the new raster to disk (default: "temp_output.tif")
-    
-    Returns:
-    - rasterio.io.DatasetReader object of the newly written raster
-    """
-    # Copy metadata from the template raster
+    """Convert a numpy array to a rasterio dataset using metadata from a template raster."""
     out_meta = template_raster.meta.copy()
-    
-    # Update metadata to match the raster_data
     out_meta.update({
-        "count": 1,  # number of bands
+        "count": 1,
         "dtype": raster_data.dtype,
         "height": raster_data.shape[0],
         "width": raster_data.shape[1],
         "transform": template_raster.transform
     })
-
-    # Write the raster_data to a new file
     with rasterio.open(output_file, "w", **out_meta) as dest:
-        dest.write(raster_data, 1)  # write to band 1
-
-    # Reopen the written file and return it
+        dest.write(raster_data, 1)
     return rasterio.open(output_file)
 
 def extract_values_from_raster(raster, shape_object):
-    """
-    Extracts values from a raster at given point locations.
-
-    Parameters
-    ----------
-    raster : rasterio.io.DatasetReader
-        The raster that we are sampling from.
-    shape_object : list
-        A list of point objects with x and y coordinates.
-
-    Returns
-    -------
-    list
-        A list of raster values at the point locations.
-
-    """
-    
+    """Extract values from a raster at given point locations."""
     values = []
-    
     for point in shape_object:
-        x = point.x
-        y = point.y
-        
-        for val in raster.sample([(x,y)]):
+        x_coord = point.x
+        y_coord = point.y
+        for val in raster.sample([(x_coord, y_coord)]):
             values.append(val[0])
-   
     return values
 
-def make_classifier(x, y, verbose=False):
-    """
-    Trains a machine learning classifier based on training data.
-
-    Parameters
-    ----------
-    x : pandas.DataFrame or numpy.ndarray
-        The input feature data for training.
-    y : pandas.Series or numpy.ndarray
-        The target labels.
-    verbose : bool, optional
-        If True, prints progress and performance details.
-
-    Returns
-    -------
-    object
-        A trained classifier object.
-    """
-
-    # Create the classifier
+def make_classifier(x_data, y_labels, verbose=False):
+    """Train a random forest classifier."""
     classifier = RandomForestClassifier(n_estimators=100, random_state=0)
-
-    # Fit the classifier to the training data
-    classifier.fit(x, y)
-
-    # Optionally print progress details
+    classifier.fit(x_data, y_labels)
     if verbose:
         print("Classifier trained successfully.")
-
     return classifier
 
-def make_prob_raster_data(topo, geo, lc, dist_fault_rasterised, slope, classifier):
-    """
-    Creates a probability raster predicting landslide hazard using input rasters and a classifier.
-
-    Parameters
-    ----------
-    topo : rasterio.io.DatasetReader
-        Topography raster dataset (used as spatial template).
-    geo : rasterio.io.DatasetReader
-        Geology raster dataset.
-    lc : rasterio.io.DatasetReader
-        Landcover raster dataset.
-    dist_fault_rasterised : numpy.ndarray
-        Rasterised faults (e.g., binary array: 1 where fault exists, else 0).
-    slope : numpy.ndarray
-        Array containing slope values.
-    classifier : object
-        Trained classifier used for prediction.
-
-    Returns
-    -------
-    numpy.ndarray
-        Array containing predicted landslide probabilities.
-    """
-
-    # Calculate distance raster to fault pixels (where value == 1)
-    distance_to_fault = proximity(topo, dist_fault_rasterised, value=1)
-
-    # Read the other rasters as numpy arrays
+def make_prob_raster_data(topo, geo, lc, dist_fault_rasterised, slope, classifier, proximity_func):
+    """Create a probability raster predicting landslide hazard."""
+    distance_to_fault = proximity_func(topo, dist_fault_rasterised, value=1)
     topo_arr = topo.read(1)
     geo_arr = geo.read(1)
     lc_arr = lc.read(1)
 
-    # Flatten all arrays for classifier input (stack features column-wise)
-    # Make sure all arrays have the same shape!
-    height, width = topo_arr.shape
-    n_pixels = height * width
-
-    # Flatten arrays
     topo_flat = topo_arr.flatten()
     geo_flat = geo_arr.flatten()
     lc_flat = lc_arr.flatten()
     dist_fault_flat = distance_to_fault.flatten()
     slope_flat = slope.flatten()
 
-    # Stack features into 2D array (n_samples x n_features)
-    X = np.vstack([topo_flat, geo_flat, lc_flat, dist_fault_flat, slope_flat]).T
-
-    # Predict probabilities of landslide hazard
-    # Assuming classifier.predict_proba returns probabilities with shape (n_samples, n_classes)
-    # and that landslide class is at index 1
-    probs = classifier.predict_proba(X)[:, 1]
-
-    # Reshape probabilities back to raster shape
-    prob_raster = probs.reshape((height, width))
-
+    features = np.vstack([topo_flat, geo_flat, lc_flat, dist_fault_flat, slope_flat]).T
+    probs = classifier.predict_proba(features)[:, 1]
+    prob_raster = probs.reshape(topo_arr.shape)
     return prob_raster
 
 def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides_gdf):
-    """
-    Compiles input raster and vector data into a pandas DataFrame for model training.
+    """Compile raster and vector inputs into a GeoDataFrame with features and landslide labels."""
+    if not isinstance(shape, gpd.GeoDataFrame):
+        shape = gpd.GeoDataFrame(geometry=shape)
 
-    Parameters
-    ----------
-    topo : rasterio.io.DatasetReader
-        Topography raster dataset.
-    geo : rasterio.io.DatasetReader
-        Geology raster dataset.
-    lc : rasterio.io.DatasetReader
-        Landcover raster dataset.
-    dist_fault : numpy.ndarray
-        Array containing distance-to-fault values.
-    slope : numpy.ndarray
-        Array containing slope values.
-    shape : geopandas.GeoDataFrame
-        GeoDataFrame containing point locations for sampling.
-    landslides : geopandas.GeoDataFrame
-        GeoDataFrame containing known landslide locations.
-
-    Returns
-    -------
-    pandas.DataFrame
-        DataFrame containing input variables and corresponding landslide labels.
-    """
-    landslides = gpd.read_file("data/landslides.shp")
-    
-    # If dist_fault or slope are rasterio DatasetReader objects, convert them to numpy arrays
     if hasattr(dist_fault, 'read'):
         dist_fault = dist_fault.read(1)
     if hasattr(slope, 'read'):
         slope = slope.read(1)
-    
-    
-    # Ensure they are 2D
-    height, width = topo.read(1).shape
-    if dist_fault.ndim == 1:
-        dist_fault = dist_fault.reshape((height, width))
-    if slope.ndim == 1:
-        slope = slope.reshape((height, width))
-        
-    # Ensure shape is a GeoDataFrame if it's not already
-    if not hasattr(shape, "geometry"):
-      shape = gpd.GeoDataFrame(geometry=shape)
-      
-    # Helper function to extract raster value at a point
-    def extract_raster_value(raster, point):
-        for val in raster.sample([(point.x, point.y)]):
-            return val[0]
 
-    # Extract raster values for each point in shape GeoDataFrame
-    topo_vals = [extract_raster_value(topo, pt) for pt in shape.geometry]
-    geo_vals = [extract_raster_value(geo, pt) for pt in shape.geometry]
-    lc_vals = [extract_raster_value(lc, pt) for pt in shape.geometry]
+    def extract_values(raster, points):
+        return [val[0] for val in raster.sample([(pt.x, pt.y) for pt in points.geometry])]
 
-    # Extract distance and slope values at each point by converting point to row,col
-    # Use rasterio.transform.rowcol to get raster indices from coordinates
-    rows, cols = zip(*[rasterio.transform.rowcol(topo.transform, pt.x, pt.y)\
-    for pt in shape.geometry])
+    elev_vals = extract_values(topo, shape)
+    geo_vals = extract_values(geo, shape)
+    lc_vals = extract_values(lc, shape)
+    fault_vals = extract_values(dist_fault if hasattr(dist_fault, 'sample') else topo, shape)
+    slope_vals = extract_values(slope if hasattr(slope, 'sample') else topo, shape)
 
-    dist_vals = [dist_fault[row, col] for row, col in zip(rows, cols)]
-    slope_vals = [slope[row, col] for row, col in zip(rows, cols)]
+    labels = [0] * len(shape) if landslides_gdf == 0 else [
+        1 if landslides_gdf.intersects(pt).any() else 0 for pt in shape.geometry]
 
-    # Create a list to hold labels: 1 if point intersects landslide, else 0
-    # We'll check for spatial intersection with landslide polygons
-    labels = []
-    for pt in shape.geometry:
-        intersects = landslides.intersects(pt).any()
-        labels.append(1 if intersects else 0)
+    df = gpd.GeoDataFrame({
+       'elev': elev_vals,
+       'fault': fault_vals,
+       'slope': slope_vals,
+       'LC': lc_vals,
+       'Geol': geo_vals,
+       'ls': labels
+    }, geometry=shape.geometry, crs=shape.crs)
 
-    # Assemble DataFrame
-    df = pd.DataFrame({
-        'topo': topo_vals,
-        'geo': geo_vals,
-        'lc': lc_vals,
-        'dist_fault': dist_vals,
-        'slope': slope_vals,
-        'landslide': labels
-    })
     return df
 
 def main():
-    """
-    Command-line interface for landslide hazard modelling.
-
-    Parses user-specified input arguments for raster and vector files,
-    runs the landslide hazard model pipeline, and writes output raster file.
-
-    Parameters
-    ----------
-    None
-
-    Returns
-    -------
-    None
-    """
-
+    """Command-line interface for landslide hazard modelling."""
     parser = argparse.ArgumentParser(
-                     prog="Landslide hazard using ML",
-                     description="Calculate landslide hazards using simple ML",
-                     epilog="Copyright 2024, Jon Hill"
-                     )
-    parser.add_argument('--topography',
-                    required=True,
-                    help="topographic raster file")
-    parser.add_argument('--geology',
-                    required=True,
-                    help="geology raster file")
-    parser.add_argument('--landcover',
-                    required=True,
-                    help="landcover raster file")
-    parser.add_argument('--faults',
-                    required=True,
-                    help="fault location shapefile")
-    parser.add_argument("landslides",
-                    help="the landslide location shapefile")
-    parser.add_argument("output",
-                    help="the output raster file")
-    parser.add_argument('-v', '--verbose',
-                    action='store_true',
-                    default=False,
-                    help="Print progress")
+        prog="Landslide hazard using ML",
+        description="Calculate landslide hazards using simple ML",
+        epilog="Copyright 2024, Jon Hill"
+    )
+
+    parser.add_argument('--topography', required=True, help="topographic raster file")
+    parser.add_argument('--geology', required=True, help="geology raster file")
+    parser.add_argument('--landcover', required=True, help="landcover raster file")
+    parser.add_argument('--faults', required=True, help="fault location shapefile")
+    parser.add_argument("landslides", help="the landslide location shapefile")
+    parser.add_argument("output", help="the output raster file")
+    parser.add_argument('-v', '--verbose', action='store_true', default=False,\
+    help="Print progress")
 
     args = parser.parse_args()
 
+    if args.verbose:
+        print("Opening input datasets...")
+
+    topo = rasterio.open(args.topography)
+    geo = rasterio.open(args.geology)
+    lc = rasterio.open(args.landcover)
+
+    if args.verbose:
+        print("Reading faults shapefile...")
+    faults = gpd.read_file(args.faults)
+
+    if args.verbose:
+        print("Reading landslides shapefile...")
+    landslides = gpd.read_file(args.landslides)
+
+    if args.verbose:
+        print("Rasterizing faults shapefile...")
+    fault_shapes = [(geom, 1) for geom in faults.geometry]
+
+    fault_raster = rasterize(
+        fault_shapes,
+        out_shape=topo.shape,
+        transform=topo.transform,
+        fill=0,
+        dtype='uint8'
+    )
+
+    if args.verbose:
+        print("Calculating slope raster...")
+    from slope_module import calculate_slope  # assuming you move slope calc here
+    slope = calculate_slope(topo.read(1), topo.transform)
+
+    if args.verbose:
+        print("Creating training dataframe...")
+    training_df = create_dataframe(topo, geo, lc, fault_raster, slope, list\
+    (landslides.geometry), landslides)
+
+    if args.verbose:
+        print("Training classifier...")
+    classifier = make_classifier(training_df.drop('ls', axis=1), training_df\
+    ['ls'], verbose=args.verbose)
+
+    if args.verbose:
+        print("Predicting landslide probabilities...")
+    from proximity_module import proximity  # assuming proximity func here
+    prob_raster = make_prob_raster_data(topo, geo, lc, fault_raster, slope, classifier, proximity)
+
+    if args.verbose:
+        print(f"Saving output raster to {args.output} ...")
+    convert_to_rasterio(prob_raster.astype(np.float32), topo, output_file=args.output)
+
+    if args.verbose:
+        print("Done!")
 
 if __name__ == '__main__':
     main()
