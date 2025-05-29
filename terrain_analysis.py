@@ -14,6 +14,7 @@ from proximity import proximity
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 import pandas as pd
+from rasterio.io import MemoryFile
 
 def convert_to_rasterio(raster_data, template_raster):
     """Convert a NumPy array to a Rasterio in-memory raster using the profile of a template raster."""
