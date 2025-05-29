@@ -1,20 +1,21 @@
-"""
+'''
 Landslide hazard prediction using machine learning.
 Processes raster and shapefile data to train a Random Forest classifier
 and generate a landslide probability map.
-"""
+'''
 
 import argparse
 import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.features import rasterize
+from rasterio.io import MemoryFile
 from shapely.geometry import Point
-from proximity import proximity
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 import pandas as pd
-from rasterio.io import MemoryFile
+from proximity import proximity
+
 
 def convert_to_rasterio(raster_data, template_raster):
     """Convert a NumPy array to a Rasterio in-memory raster using a template's profile."""
@@ -25,21 +26,22 @@ def convert_to_rasterio(raster_data, template_raster):
         dataset.write(raster_data.astype(rasterio.float32), 1)
     return memfile.open()
 
-def extract_values_from_raster(raster, shape_object):
-    """Extract raster values at the centroids of geometries from a GeoSeries."""
+
+def extract_values_from_raster(raster, shape_series):
+    """Extract raster values at the centroids of geometries in a GeoSeries."""
     values = []
-    for geom in shape_object:
+    for geom in shape_series:
         centroid = geom.centroid
         try:
             row, col = raster.index(centroid.x, centroid.y)
             if 0 <= row < raster.height and 0 <= col < raster.width:
-                val = raster.read(1)[row, col]
-                values.append(val)
+                values.append(raster.read(1)[row, col])
             else:
                 values.append(np.nan)
-        except Exception:
+        except (ValueError, IndexError):
             values.append(np.nan)
     return values
+
 
 def make_classifier(x, y, verbose=False):
     """Train and return a RandomForestClassifier on the input data."""
@@ -49,126 +51,162 @@ def make_classifier(x, y, verbose=False):
         print("Training accuracy:", accuracy_score(y, clf.predict(x)))
     return clf
 
-def make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier):
-    """Generate a raster of predicted landslide probabilities using a trained classifier."""
+
+def make_prob_raster_data(config):
+    """Generates a probability raster from input layers using a trained classifier."""
+    topo = config['topo']
+    geo = config['geo']
+    lc = config['lc']
+    dist = config['dist_fault']
+    slope = config['slope']
+    clf = config['classifier']
+
     rows, cols = topo.read(1).shape
-    elev_data = topo.read(1)
-    geol_data = geo.read(1)
+    flat_data, valid = build_feature_matrix(topo, geo, lc, dist, slope)
+    probs = np.zeros(flat_data.shape[0])
+    if valid.any():
+        probs[valid] = clf.predict_proba(flat_data[valid])[:, 1]
+    return probs.reshape((rows, cols))
+
+
+def build_feature_matrix(topo, geo, lc, dist, slope):
+    """Builds a flat feature matrix and a validity mask from raster inputs."""
+    elev = topo.read(1)
+    geol = geo.read(1)
     lc_data = lc.read(1)
-    fault_data = dist_fault.read(1)
+    dist_data = dist.read(1)
     slope_data = slope.read(1)
 
     flat_data = np.column_stack([
-        elev_data.ravel(),
-        fault_data.ravel(),
-        slope_data.ravel(),
-        lc_data.ravel(),
-        geol_data.ravel()
+        elev.ravel(), dist_data.ravel(), slope_data.ravel(),
+        lc_data.ravel(), geol.ravel()
     ])
-
     valid = ~np.any(np.isnan(flat_data), axis=1)
-    probs = np.zeros(flat_data.shape[0])
-    if valid.any():
-        probs[valid] = classifier.predict_proba(flat_data[valid])[:, 1]
+    return flat_data, valid
 
-    return probs.reshape((rows, cols))
 
-def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
-    """Create a GeoDataFrame with raster values at point geometries and landslide labels."""
-    if not isinstance(shape, gpd.GeoSeries):
-        shape = gpd.GeoSeries(shape)
-
-    elev_values = extract_values_from_raster(topo, shape)
-    geo_values = extract_values_from_raster(geo, shape)
-    lc_values = extract_values_from_raster(lc, shape)
-    dist_values = extract_values_from_raster(dist_fault, shape)
-    slope_values = extract_values_from_raster(slope, shape)
-
-    if isinstance(landslides, int):
-        labels = [landslides for _ in shape]
-    else:
-        buffer_dist = 80
-        landslide_buffers = landslides.geometry.buffer(buffer_dist)
-        labels = [1 if landslide_buffers.contains(geom).any() else 0 for geom in shape]
-
-    data = {
-        'elev': elev_values,
-        'fault': dist_values,
-        'slope': slope_values,
-        'LC': lc_values,
-        'Geol': geo_values,
-        'ls': labels
+def extract_all_raster_values(rasters, shape_series):
+    """Extract values from multiple raster layers given in a dict."""
+    return {
+        'elev': extract_values_from_raster(rasters['topo'], shape_series),
+        'fault': extract_values_from_raster(rasters['dist_fault'], shape_series),
+        'slope': extract_values_from_raster(rasters['slope'], shape_series),
+        'LC': extract_values_from_raster(rasters['lc'], shape_series),
+        'Geol': extract_values_from_raster(rasters['geo'], shape_series)
     }
 
-    crs = topo.crs if hasattr(topo, 'crs') and topo.crs else "EPSG:32632"
-    df = gpd.GeoDataFrame(data, geometry=shape, crs=crs)
-    df.dropna(inplace=True)
-    return df[['elev', 'fault', 'slope', 'LC', 'Geol', 'ls']]
 
-def main():
-    """Main function to parse arguments, process data, train model, and save output raster."""
-    parser = argparse.ArgumentParser(
-        prog="Landslide hazard using ML",
-        description="Calculate landslide hazards using simple ML",
-        epilog="Copyright 2024, Jon Hill"
+def assign_landslide_labels(points, landslides):
+    """Assign binary labels to points based on proximity to landslides."""
+    buffers = landslides.geometry.buffer(80)
+    return [1 if buffers.contains(pt).any() else 0 for pt in points]
+
+
+def _create_dataframe(rasters, points, landslides):
+    """Internal: Create a GeoDataFrame with raster values and landslide labels."""
+    pts_series = gpd.GeoSeries(points) if not isinstance(points, gpd.GeoSeries) else points
+    values = extract_all_raster_values(rasters, pts_series)
+
+    if isinstance(landslides, int):
+        labels = [landslides] * len(pts_series)
+    else:
+        labels = assign_landslide_labels(pts_series, landslides)
+
+    df = gpd.GeoDataFrame(
+        values,
+        geometry=pts_series,
+        crs=rasters['topo'].crs or 'EPSG:32632'
     )
-    parser.add_argument('--topography', required=True, help="topographic raster file")
-    parser.add_argument('--geology', required=True, help="geology raster file")
-    parser.add_argument('--landcover', required=True, help="landcover raster file")
-    parser.add_argument('--faults', required=True, help="fault location shapefile")
-    parser.add_argument("landslides", help="the landslide location shapefile")
-    parser.add_argument("output", help="the output raster file")
-    parser.add_argument('-v', '--verbose', action='store_true', default=False, help="Print progress")
+    df['ls'] = labels
+    df.dropna(inplace=True)
+    return df[['elev', 'fault', 'slope', 'LC', 'Geol', 'ls', 'geometry']]
 
-    args = parser.parse_args()
 
-    topo = rasterio.open(args.topography)
-    geo = rasterio.open(args.geology)
-    lc = rasterio.open(args.landcover)
-    faults = gpd.read_file(args.faults)
-    landslides = gpd.read_file(args.landslides)
+def create_dataframe(topo, geo, lc, dist_fault, slope, points, landslides):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    """Create a GeoDataFrame (positional signature for backward compatibility)."""
+    rasters = {'topo': topo, 'geo': geo, 'lc': lc, 'dist_fault': dist_fault, 'slope': slope}
+    return _create_dataframe(rasters, points, landslides)
 
-    fault_rasterized = rasterize(
+
+def generate_random_points(bounds, num_points, crs):
+    """Generate random points within bounds."""
+    xs = np.random.uniform(bounds.left, bounds.right, num_points)
+    ys = np.random.uniform(bounds.bottom, bounds.top, num_points)
+    return gpd.GeoSeries([Point(x, y) for x, y in zip(xs, ys)], crs=crs)
+
+
+def prepare_raster_inputs(topo):
+    """Generate slope raster from topographic data."""
+    elev_data = topo.read(1).astype('float32')
+    grad_y, grad_x = np.gradient(elev_data)
+    slope_arr = np.sqrt(grad_x**2 + grad_y**2)
+    return convert_to_rasterio(slope_arr, topo)
+
+
+def prepare_fault_distance_raster(topo, faults):
+    """Generate distance-to-fault raster."""
+    fault_rast = rasterize(
         [(geom, 1) for geom in faults.geometry],
         out_shape=topo.read(1).shape,
         transform=topo.transform,
         fill=0,
         dtype='uint8'
     )
-    dist_fault_array = proximity(topo, fault_rasterized, 1)
-    dist_fault = convert_to_rasterio(dist_fault_array.astype('float32'), topo)
+    dist_arr = proximity(topo, fault_rast, 1)
+    return convert_to_rasterio(dist_arr.astype('float32'), topo)
 
-    elev_data = topo.read(1).astype("float32")
-    grad_y, grad_x = np.gradient(elev_data)
-    slope_array = np.sqrt(grad_x**2 + grad_y**2)
-    slope = convert_to_rasterio(slope_array, topo)
 
-    landslide_points = landslides.geometry
-    df_landslides = create_dataframe(topo, geo, lc, dist_fault, slope, landslide_points, landslides)
+def main():
+    """Main entrypoint to parse args, train model, and write probability map."""
+    parser = argparse.ArgumentParser(
+        prog='Landslide hazard using ML',
+        description='Calculate landslide hazards using simple ML'
+    )
+    parser.add_argument('--topography', required=True)
+    parser.add_argument('--geology', required=True)
+    parser.add_argument('--landcover', required=True)
+    parser.add_argument('--faults', required=True)
+    parser.add_argument('landslides')
+    parser.add_argument('output')
+    parser.add_argument('-v', '--verbose', action='store_true')
 
-    bounds = topo.bounds
-    num_samples = len(df_landslides)
-    xs = np.random.uniform(bounds.left, bounds.right, num_samples)
-    ys = np.random.uniform(bounds.bottom, bounds.top, num_samples)
-    random_points = gpd.GeoSeries([Point(x, y) for x, y in zip(xs, ys)], crs=topo.crs)
-    df_random = create_dataframe(topo, geo, lc, dist_fault, slope, random_points, 0)
+    args = parser.parse_args()
+    topo = rasterio.open(args.topography)
+    geo = rasterio.open(args.geology)
+    lc = rasterio.open(args.landcover)
+    faults = gpd.read_file(args.faults)
+    landslides = gpd.read_file(args.landslides)
 
-    df = pd.concat([df_landslides, df_random], ignore_index=True)
-    df.dropna(inplace=True)
+    dist_fault = prepare_fault_distance_raster(topo, faults)
+    slope = prepare_raster_inputs(topo)
 
-    x = df[['elev', 'fault', 'slope', 'LC', 'Geol']]
-    y = df['ls']
+    df_ls = create_dataframe(topo, geo, lc, dist_fault, slope, landslides.geometry, landslides)
+    df = pd.concat([
+        df_ls,
+        create_dataframe(
+            topo, geo, lc, dist_fault, slope,
+            generate_random_points(topo.bounds, len(df_ls), topo.crs),
+            0
+        )
+    ], ignore_index=True)
 
-    classifier = make_classifier(x, y, args.verbose)
-    prob_raster = make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier)
+    clf = make_classifier(df[['elev', 'fault', 'slope', 'LC', 'Geol']], df['ls'], args.verbose)
+    prob = make_prob_raster_data({
+        'topo': topo,
+        'geo': geo,
+        'lc': lc,
+        'dist_fault': dist_fault,
+        'slope': slope,
+        'classifier': clf
+    })
 
-    profile = topo.profile
+    profile = topo.profile.copy()
     profile.update(dtype='float32', count=1)
     with rasterio.open(args.output, 'w', **profile) as dst:
-        dst.write(prob_raster, 1)
-
+        dst.write(prob, 1)
     if args.verbose:
         print(f"Probability raster written to {args.output}")
+
 
 if __name__ == '__main__':
     main()
