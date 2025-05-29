@@ -37,7 +37,7 @@ def extract_values_from_raster(raster, shape_object):
                 values.append(val)
             else:
                 values.append(np.nan)
-        except:
+        except Exception:
             values.append(np.nan)
     return values
 
