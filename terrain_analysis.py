@@ -52,8 +52,6 @@ def make_classifier(x, y, verbose=False):
 def make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier):
     """Generate a raster of predicted landslide probabilities using a trained classifier."""
     rows, cols = topo.read(1).shape
-    prob_raster = np.zeros((rows, cols), dtype=np.float32)
-
     elev_data = topo.read(1)
     geol_data = geo.read(1)
     lc_data = lc.read(1)
@@ -73,8 +71,7 @@ def make_prob_raster_data(topo, geo, lc, dist_fault, slope, classifier):
     if valid.any():
         probs[valid] = classifier.predict_proba(flat_data[valid])[:, 1]
 
-    prob_raster = probs.reshape((rows, cols))
-    return prob_raster
+    return probs.reshape((rows, cols))
 
 def create_dataframe(topo, geo, lc, dist_fault, slope, shape, landslides):
     """Create a GeoDataFrame with raster values at point geometries and landslide labels."""
