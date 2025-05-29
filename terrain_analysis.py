@@ -17,7 +17,7 @@ import pandas as pd
 from rasterio.io import MemoryFile
 
 def convert_to_rasterio(raster_data, template_raster):
-    """Convert a NumPy array to a Rasterio in-memory raster using the profile of a template raster."""
+    """Convert a NumPy array to a Rasterio in-memory raster using a template's profile."""
     from rasterio.io import MemoryFile
     profile = template_raster.profile.copy()
     profile.update(dtype=rasterio.float32, count=1)
