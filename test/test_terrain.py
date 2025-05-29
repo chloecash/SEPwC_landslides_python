@@ -62,7 +62,7 @@ class TestTerrainAnalysis():
                               0)
         assert type(df) == gpd.geodataframe.GeoDataFrame
         assert len(df) == 2
-        assert np.array_equal(np.array(df.columns), np.array(['elev', 'fault', 'slope', 'LC', 'Geol', 'ls']))
+        assert np.array_equal(np.array(df.columns), np.array(['elev', 'fault', 'slope', 'LC', 'Geol', 'ls', 'geometry']))
         assert df['ls'].to_list() == [0,0]
         
 
